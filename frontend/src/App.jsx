@@ -12,6 +12,16 @@ import Dashboard from './pages/Dashboard';
 import RoutinePlanner from './pages/RoutinePlanner';
 import HealthAssistant from './pages/HealthAssistant';
 
+// Admin Pages
+import AdminLogin from './pages/admin/AdminLogin';
+import AdminRoute from './pages/admin/AdminRoute';
+import AdminLayout from './pages/admin/AdminLayout';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminAnalytics from './pages/admin/AdminAnalytics';
+import AdminSystemControls from './pages/admin/AdminSystemControls';
+import AdminLogs from './pages/admin/AdminLogs';
+
 import './index.css';
 
 // Auth Context
@@ -109,6 +119,17 @@ const AppRoutes = () => {
                 <Route path="/dashboard" element={<PrivateRoute><Dashboard key={user?.uid} /></PrivateRoute>} />
                 <Route path="/routine" element={<PrivateRoute><RoutinePlanner key={user?.uid} /></PrivateRoute>} />
                 <Route path="/assistant" element={<PrivateRoute><HealthAssistant key={user?.uid} /></PrivateRoute>} />
+
+                {/* Admin Routes */}
+                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+                    <Route index element={<Navigate to="/admin/dashboard" />} />
+                    <Route path="dashboard" element={<AdminDashboard />} />
+                    <Route path="users" element={<AdminUsers />} />
+                    <Route path="analytics" element={<AdminAnalytics />} />
+                    <Route path="settings" element={<AdminSystemControls />} />
+                    <Route path="logs" element={<AdminLogs />} />
+                </Route>
             </Routes>
         </div>
     );
