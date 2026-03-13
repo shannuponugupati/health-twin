@@ -10,13 +10,22 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
 // ── Sub-Components ───────────────────────────────────────────────────────────
 
-const TimelineEvent = ({ event, index, isNext, onToggle }) => {
+const TimelineEvent = ({ event, index, isNext, onToggle, onComplete, onTimeChange }) => {
     const [visible, setVisible] = useState(false);
+    const [isEditingTime, setIsEditingTime] = useState(false);
+    const [editTime, setEditTime] = useState(event.time);
 
     useEffect(() => {
         const t = setTimeout(() => setVisible(true), index * 80);
         return () => clearTimeout(t);
     }, [index]);
+
+    const handleTimeSave = () => {
+        setIsEditingTime(false);
+        if (editTime !== event.time) {
+            onTimeChange(event.key, editTime);
+        }
+    };
 
     return (
         <div style={{
@@ -29,15 +38,48 @@ const TimelineEvent = ({ event, index, isNext, onToggle }) => {
             marginBottom: '0.5rem',
         }}>
             {/* Time column */}
-            <div style={{ minWidth: '72px', textAlign: 'right', paddingTop: '0.75rem' }}>
-                <span style={{
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    color: isNext ? event.color : 'var(--text-muted)',
-                    lineHeight: 1,
-                }}>
-                    {formatTime12(event.time)}
-                </span>
+            <div style={{ minWidth: '85px', textAlign: 'right', paddingTop: '0.75rem' }}>
+                {isEditingTime ? (
+                    <input
+                        type="time"
+                        value={editTime}
+                        onChange={(e) => setEditTime(e.target.value)}
+                        onBlur={handleTimeSave}
+                        autoFocus
+                        style={{
+                            width: '100%',
+                            background: 'rgba(0,0,0,0.5)',
+                            border: `1px solid ${event.color}`,
+                            color: '#fff',
+                            borderRadius: '4px',
+                            padding: '0.2rem',
+                            fontSize: '0.75rem',
+                            outline: 'none',
+                        }}
+                    />
+                ) : (
+                    <span 
+                        onClick={() => setIsEditingTime(true)}
+                        style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            color: isNext ? event.color : 'var(--text-muted)',
+                            lineHeight: 1,
+                            cursor: 'pointer',
+                            display: 'inline-block',
+                            padding: '0.2rem 0.4rem',
+                            borderRadius: '4px',
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid transparent',
+                            transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+                        title="Click to edit time"
+                    >
+                        {formatTime12(event.time)} ✏️
+                    </span>
+                )}
             </div>
 
             {/* Spine */}
@@ -93,34 +135,66 @@ const TimelineEvent = ({ event, index, isNext, onToggle }) => {
                 )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                        <div style={{
-                            fontWeight: 700,
-                            fontSize: '0.95rem',
-                            color: event.enabled ? 'var(--text-main)' : 'var(--text-muted)',
-                            marginBottom: '0.2rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', flex: 1 }}>
+                        {/* Completion Checkbox */}
+                        <button
+                            onClick={() => onComplete(event.key)}
+                            style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '50%',
+                                border: `2px solid ${event.completed ? '#10B981' : 'rgba(255,255,255,0.2)'}`,
+                                background: event.completed ? '#10B981' : 'transparent',
+                                color: event.completed ? '#030712' : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                                marginTop: '0.2rem',
+                                padding: 0,
+                                fontSize: '1.2rem',
+                                fontWeight: 'bold',
+                                transition: 'all 0.2s ease',
+                                boxShadow: event.completed ? '0 0 10px rgba(16, 185, 129, 0.4)' : 'none'
+                            }}
+                            title={event.completed ? "Mark as pending" : "Mark as completed"}
+                        >
+                            ✓
+                        </button>
+                        <div style={{ 
+                            textDecoration: event.completed ? 'line-through' : 'none', 
+                            opacity: event.completed ? 0.5 : 1,
+                            transition: 'opacity 0.3s'
                         }}>
-                            {event.label}
-                            {isNext && (
-                                <span style={{
-                                    fontSize: '0.65rem',
-                                    background: event.color,
-                                    color: '#030712',
-                                    padding: '0.15rem 0.5rem',
-                                    borderRadius: '4px',
-                                    fontWeight: 900,
-                                    letterSpacing: '0.1em',
-                                    boxShadow: `0 0 10px ${event.color}`
-                                }}>
-                                    NEXT UP
-                                </span>
-                            )}
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                            {event.description}
+                            <div style={{
+                                fontWeight: 700,
+                                fontSize: '0.95rem',
+                                color: event.enabled ? 'var(--text-main)' : 'var(--text-muted)',
+                                marginBottom: '0.2rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                            }}>
+                                {event.label}
+                                {isNext && !event.completed && (
+                                    <span style={{
+                                        fontSize: '0.65rem',
+                                        background: event.color,
+                                        color: '#030712',
+                                        padding: '0.15rem 0.5rem',
+                                        borderRadius: '4px',
+                                        fontWeight: 900,
+                                        letterSpacing: '0.1em',
+                                        boxShadow: `0 0 10px ${event.color}`
+                                    }}>
+                                        NEXT UP
+                                    </span>
+                                )}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                                {event.description}
+                            </div>
                         </div>
                     </div>
 
@@ -257,6 +331,33 @@ const RoutinePlanner = () => {
         setRoutine(prev => prev.map(e => e.key === key ? { ...e, enabled: !e.enabled } : e));
     }, []);
 
+    const toggleCompletion = useCallback((key) => {
+        setRoutine(prev => {
+            const up = prev.map(e => e.key === key ? { ...e, completed: !e.completed } : e);
+            if (user) {
+                setDoc(doc(db, 'routines', user.uid), { routine: up }, { merge: true }).catch(console.error);
+            }
+            return up;
+        });
+    }, [user]);
+
+    const changeTime = useCallback((key, newTime) => {
+        setRoutine(prev => {
+            // Update time and re-sort
+            const updated = prev.map(e => e.key === key ? { ...e, time: newTime } : e);
+            const sorted = updated.sort((a, b) => {
+                const aMins = parseInt(a.time.split(':')[0]) * 60 + parseInt(a.time.split(':')[1]);
+                const bMins = parseInt(b.time.split(':')[0]) * 60 + parseInt(b.time.split(':')[1]);
+                return aMins - bMins;
+            });
+
+            if (user) {
+                setDoc(doc(db, 'routines', user.uid), { routine: sorted }, { merge: true }).catch(console.error);
+            }
+            return sorted;
+        });
+    }, [user]);
+
     const handleEnableAllSms = async () => {
         if (!userData?.phone) {
             alert('No phone number found. Please update your questionnaire.');
@@ -322,6 +423,20 @@ const RoutinePlanner = () => {
     );
 
     const enabledCount = routine.filter(r => r.enabled).length;
+    const completedCount = routine.filter(r => r.completed).length;
+    const totalCount = routine.length;
+    const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    const getFeedbackMessage = () => {
+        if (totalCount === 0) return null;
+        if (completionPercentage === 100) return { emoji: '🏆', text: 'Perfect Day! You nailed every single habit.', color: '#10B981' };
+        if (completionPercentage >= 75) return { emoji: '🔥', text: 'Excellent work! Your consistency is building strong neural pathways.', color: '#3B82F6' };
+        if (completionPercentage >= 50) return { emoji: '📈', text: 'Good effort! You are halfway there. Keep pushing momentum.', color: '#F59E0B' };
+        if (completionPercentage > 0) return { emoji: '🌱', text: 'Every step counts. Focus on completing just one more habit tomorrow.', color: '#8B5CF6' };
+        return { emoji: '🌅', text: 'A new day is a fresh start. Try completing your first habit tomorrow morning!', color: 'var(--text-secondary)' };
+    };
+
+    const feedback = getFeedbackMessage();
 
     return (
         <div className="container animate-fade-in" style={{ paddingTop: '1.5rem', paddingBottom: '4rem' }}>
@@ -440,9 +555,68 @@ const RoutinePlanner = () => {
                                 index={idx}
                                 isNext={event.key === nextEventKey}
                                 onToggle={toggleReminder}
+                                onComplete={toggleCompletion}
+                                onTimeChange={changeTime}
                             />
                         ))}
                     </div>
+
+                    {/* Feedback Card */}
+                    {feedback && (
+                        <div className="glass-panel" style={{ 
+                            marginTop: '1.5rem', 
+                            padding: '1.5rem', 
+                            borderLeft: `4px solid ${feedback.color}`,
+                            background: `linear-gradient(90deg, ${feedback.color}11, transparent)`
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                <h3 style={{ margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ fontSize: '1.3rem' }}>📊</span> Daily Recap
+                                </h3>
+                                <span style={{ 
+                                    fontWeight: 'bold', 
+                                    fontSize: '1.2rem', 
+                                    color: feedback.color,
+                                    textShadow: `0 0 10px ${feedback.color}55`
+                                }}>
+                                    {completionPercentage}%
+                                </span>
+                            </div>
+                            
+                            {/* Progress Bar */}
+                            <div style={{ height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden', marginBottom: '1rem' }}>
+                                <div style={{ 
+                                    height: '100%', 
+                                    width: `${completionPercentage}%`, 
+                                    background: feedback.color,
+                                    borderRadius: '4px',
+                                    transition: 'width 1s ease-out',
+                                    boxShadow: `0 0 10px ${feedback.color}`
+                                }} />
+                            </div>
+
+                            <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '0.75rem',
+                                color: 'var(--text-main)',
+                                fontSize: '0.95rem'
+                            }}>
+                                <span style={{ fontSize: '1.5rem', filter: `drop-shadow(0 0 5px ${feedback.color}55)` }}>
+                                    {feedback.emoji}
+                                </span>
+                                <span>{feedback.text}</span>
+                            </div>
+                            <div style={{ 
+                                marginTop: '0.75rem', 
+                                fontSize: '0.8rem', 
+                                color: 'var(--text-secondary)',
+                                textAlign: 'right'
+                            }}>
+                                {completedCount} of {totalCount} tasks completed
+                            </div>
+                        </div>
+                    )}
 
                     <button
                         className="btn btn-outline w-full mt-4"

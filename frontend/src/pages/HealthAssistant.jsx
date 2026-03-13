@@ -87,16 +87,34 @@ const HealthAssistant = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const scrollRef = useRef(null);
-    const [messages, setMessages] = useState([
-        {
-            id: 1,
-            text: "Hello! I'm your AI Health Assistant. How are you feeling today? You can describe any symptoms or ask for wellness tips.",
-            isAI: true
+    const [messages, setMessages] = useState(() => {
+        if (!user?.uid) return [{ id: 1, text: "Hello! I'm your AI Health Assistant. How are you feeling today?", isAI: true }];
+        const saved = localStorage.getItem(`health_assistant_chat_${user.uid}`);
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error("Failed to parse saved chat:", e);
+            }
         }
-    ]);
+        return [
+            {
+                id: 1,
+                text: "Hello! I'm your AI Health Assistant. How are you feeling today? You can describe any symptoms or ask for wellness tips.",
+                isAI: true
+            }
+        ];
+    });
     const [inputValue, setInputValue] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [lifestyleData, setLifestyleData] = useState(null);
+
+    // Save chat history whenever messages change
+    useEffect(() => {
+        if (user?.uid) {
+            localStorage.setItem(`health_assistant_chat_${user.uid}`, JSON.stringify(messages));
+        }
+    }, [messages, user?.uid]);
 
     useEffect(() => {
         const fetchLifestyle = async () => {
@@ -139,10 +157,11 @@ const HealthAssistant = () => {
             let responseText = "";
             let geminiFailed = false;
             try {
-                const apiKey = import.meta.env.VITE_GEMINI_API_KEY || app.options.apiKey;
-                if (!apiKey) throw new Error("API Key not found");
+                const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+                if (!apiKey) throw new Error("Missing Gemini API Key in .env");
+
                 const genAI = new GoogleGenerativeAI(apiKey);
-                const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+                const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
                 const symptomKey = detectSymptom(text);
                 const localKnowledge = symptomKey ? HEALTH_KNOWLEDGE[symptomKey] : null;
@@ -158,17 +177,29 @@ User's question: "${text}"
 Your response must:
 - Be helpful, empathetic, and detailed
 - Use emojis to structure sections
-- Use plain text only, NO markdown asterisks or pound signs for formatting
 - Feel futuristic and high-tech in tone
-- End with a short AI disclaimer only if the topic is medical`;
+- NEVER include any kind of medical disclaimer, warning, or statement about not being a substitute for professional advice. The application UI already handles this globally.`;
 
-                const result = await model.generateContent(prompt);
-                responseText = result.response.text();
+                let result;
+                try {
+                    result = await model.generateContent(prompt);
+                } catch (retryErr) {
+                    console.warn(`Model failed (${retryErr.message}), retrying with gemini-2.5-flash...`);
+                    const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+                    result = await fallbackModel.generateContent(prompt);
+                }
+
+                const response = await result.response;
+                responseText = response.text();
+                
+                if (!responseText) throw new Error("Empty response from AI");
             } catch (geminiError) {
-                console.warn("Gemini unavailable, using local fallback:", geminiError.message);
+                console.error("Gemini API Error Detail:", geminiError);
                 geminiFailed = true;
-                // Fallback to local knowledge base
+
+                const lower = text.toLowerCase().trim();
                 const symptomKey = detectSymptom(text);
+                
                 if (symptomKey) {
                     const advice = getHealthAdvice(text, lifestyleData);
                     responseText = `${advice.icon} ${advice.title} Guidance\n\n`;
@@ -177,24 +208,16 @@ Your response must:
                     responseText += `🏡 Home Remedies:\n${advice.suggestions.map(s => `• ${s}`).join('\n')}\n\n`;
                     responseText += `🛡️ Prevention:\n${advice.preventive}\n\n`;
                     responseText += `⚡ Note: AI cloud engine is temporarily at capacity. Showing local health database response.\n⚠️ If symptoms persist, consult a healthcare professional.`;
+                } else if (lower.match(/^(hi|hello|hey|howdy|yo|sup|greetings|hola)/)) {
+                    responseText = `👋 Hello! I'm your AI Health Twin Assistant, always online and ready to help!\n\n🛡️ I can assist you with:\n• Health questions (symptoms, remedies, wellness tips)\n• Diet and nutrition advice\n• Fitness and exercise guidance\n\nThe cloud AI engine is currently over its free limit, but I'm still here!`;
                 } else {
-                    const lower = text.toLowerCase().trim();
-                    // Conversational fallback for common greetings and general queries
-                    if (lower.match(/^(hi|hello|hey|howdy|yo|sup|greetings)/)) {
-                        responseText = `👋 Hello! I'm your AI Health Twin Assistant, always online and ready to help!\n\n🛡️ I can assist you with:\n• Health questions (symptoms, remedies, wellness tips)\n• Diet and nutrition advice\n• Fitness and exercise guidance\n• General questions on any topic\n\nThe cloud AI engine is temporarily at capacity right now, so ask me a health-related question and I'll pull from my built-in health database!\n\nHow can I help you today?`;
-                    } else if (lower.match(/how are you|how r u|how do you do/)) {
-                        responseText = `🤖 I'm running at optimal capacity! All systems are online.\n\nThough the cloud AI engine is temporarily at its limit, I'm still here to help with health questions, symptoms, wellness tips, and more.\n\nHow are YOU feeling today? Tell me your symptoms and I'll get you sorted! 💪`;
-                    } else if (lower.match(/what can you do|what do you do|help|capabilities/)) {
-                        responseText = `🛡️ HEALTH TWIN AI — Capabilities\n\n🔬 Symptom Analysis - Describe any symptom\n💊 Home Remedies - Natural wellness tips\n🥗 Diet & Nutrition - Food and eating advice\n🏃 Fitness Guidance - Exercise recommendations\n🚨 Emergency Detection - Identifies urgent symptoms\n🌐 General Knowledge - Science, tech, and more\n\nJust type anything and I'll do my best to help! The cloud AI is temporarily at capacity but the health database is always available.`;
-                    } else if (lower.match(/thank|thanks|ty|thank you/)) {
-                        responseText = `🙏 You're welcome! Stay healthy and take care of yourself.\n\nFeel free to ask me anything anytime — I'm always here! 💪`;
-                    } else if (lower.match(/bye|goodbye|see you|take care/)) {
-                        responseText = `👋 Goodbye! Stay healthy and hydrated!\n\nRemember:\n• Drink enough water 💧\n• Get 7-8 hours of sleep 🌙\n• Move your body daily 🏃\n• Take breaks from screens 👁️\n\nCome back anytime you need health guidance! 🛡️`;
+                    const errorMsg = geminiError.message || "";
+                    if (errorMsg.includes('429') || errorMsg.includes('quota')) {
+                        responseText = `⚡ API Quota Exceeded (429)\n\nGoogle is reporting that the free-tier limit for your API Key has been reached. \n\n🛠️ How to fix this:\n1. Wait 60 seconds (Free tier allows 15 requests per minute).\n2. If you just created the key, it may take 5 minutes to activate.\n3. Make sure you don't have multiple tabs of this app open.\n\nOffline Mode Active: Type "headache" or "sleep" for advice from my local database!`;
+                    } else if (errorMsg.includes('404')) {
+                        responseText = `⚠️ Model Connectivity Issue (404)\n\nThe AI model was not reached. This happens when the API key is restricted to a different region or brand.\n\n🛠️ Troubleshooting:\n• Ensure your API key is from Google AI Studio.\n• Check if your region supports "gemini-2.0-flash".\n• Wait a few minutes and refresh with Ctrl+F5.`;
                     } else {
-                        const isQuota = geminiError.message?.includes('429') || geminiError.message?.includes('quota');
-                        responseText = isQuota
-                            ? `⚡ Cloud Intelligence Engine at Capacity\n\nThe Gemini AI cloud engine has hit its free-tier limit for now. Please try again in a few minutes.\n\nWhile you wait, I can answer health questions from my built-in database! Try:\n• Headache  • Stress  • Fatigue\n• Poor Sleep  • Indigestion  • Dehydration\n• Fever  • Immunity  • Hydration`
-                            : `⚠️ Unable to connect: ${geminiError.message}`;
+                        responseText = `⚠️ Connection Issue: ${errorMsg}\n\nI couldn't reach the AI cloud. Please check if your internet is stable.`;
                     }
                 }
             }
@@ -226,30 +249,40 @@ Your response must:
     ];
 
     return (
-        <div className="container animate-fade-in" style={{ 
-            height: 'calc(100vh - 120px)', 
+        <div className="animate-fade-in" style={{ 
+            height: '100vh',
+            width: '100vw',
+            position: 'absolute',
+            top: 0,
+            left: 0,
             display: 'flex', 
             flexDirection: 'column',
-            paddingTop: '1.5rem',
-            paddingBottom: '2rem',
+            padding: '1.5rem',
+            background: 'var(--bg-deep)',
+            zIndex: 100
         }}>
-            
             {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', width: '100%', maxWidth: '1200px', margin: '0 auto 1.5rem auto' }}>
                 <button 
                     onClick={() => navigate('/dashboard')}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.2rem' }}
+                    className="btn"
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-main)', cursor: 'pointer', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderRadius: '8px' }}
                 >
-                    ←
+                    <span>←</span> Dashboard
                 </button>
-                <div style={{ fontSize: '2rem' }}>🛡️</div>
-                <div>
-                    <h2 style={{ margin: 0, fontSize: '1.25rem' }}>AI Health Assistant</h2>
-                    <span style={{ fontSize: '0.8rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981' }}></span>
-                        Always Active • AI Guide
-                    </span>
+                
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+                    <div style={{ fontSize: '2rem' }}>🛡️</div>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>AI Health Assistant</h2>
+                        <span style={{ fontSize: '0.8rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 10px #10B981' }}></span>
+                            Status: Online & Ready
+                        </span>
+                    </div>
                 </div>
+
+                <div style={{ width: '100px' }}>{/* Spacer for centering */}</div>
             </div>
 
             {/* Chat Body */}
@@ -260,6 +293,8 @@ Your response must:
                 overflow: 'hidden',
                 position: 'relative',
                 borderRadius: '24px',
+                border: '1px solid rgba(0, 240, 255, 0.2)',
+                boxShadow: '0 0 40px rgba(0, 240, 255, 0.05)'
             }}>
                 {/* Background Decor */}
                 <div style={{

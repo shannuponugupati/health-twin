@@ -53,6 +53,15 @@ const Navbar = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
 
+    // Clear any stale generic localStorage keys on logout
+    React.useEffect(() => {
+        if (!user) {
+            localStorage.removeItem('healthTwin_answers');
+            localStorage.removeItem('healthTwin_routine');
+            localStorage.removeItem('health_assistant_chat');
+        }
+    }, [user]);
+
     const handleLogout = async () => {
         await signOut(auth);
         navigate('/');
@@ -85,23 +94,31 @@ const Navbar = () => {
     );
 };
 
+// Inner component that has access to auth context
+const AppRoutes = () => {
+    const { user } = useAuth();
+    return (
+        <div className="app-container">
+            <Navbar />
+            <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
+                <Route path="/questionnaire" element={<PrivateRoute><Questionnaire key={user?.uid} /></PrivateRoute>} />
+                <Route path="/processing" element={<PrivateRoute><Processing key={user?.uid} /></PrivateRoute>} />
+                <Route path="/dashboard" element={<PrivateRoute><Dashboard key={user?.uid} /></PrivateRoute>} />
+                <Route path="/routine" element={<PrivateRoute><RoutinePlanner key={user?.uid} /></PrivateRoute>} />
+                <Route path="/assistant" element={<PrivateRoute><HealthAssistant key={user?.uid} /></PrivateRoute>} />
+            </Routes>
+        </div>
+    );
+};
+
 function App() {
     return (
         <Router>
             <AuthProvider>
-                <div className="app-container">
-                    <Navbar />
-                    <Routes>
-                        <Route path="/" element={<Landing />} />
-                        <Route path="/auth" element={<Auth />} />
-                        <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
-                        <Route path="/questionnaire" element={<PrivateRoute><Questionnaire /></PrivateRoute>} />
-                        <Route path="/processing" element={<PrivateRoute><Processing /></PrivateRoute>} />
-                        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-                        <Route path="/routine" element={<PrivateRoute><RoutinePlanner /></PrivateRoute>} />
-                        <Route path="/assistant" element={<PrivateRoute><HealthAssistant /></PrivateRoute>} />
-                    </Routes>
-                </div>
+                <AppRoutes />
             </AuthProvider>
         </Router>
     );

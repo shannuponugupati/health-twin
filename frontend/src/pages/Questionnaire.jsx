@@ -173,6 +173,20 @@ const Questionnaire = () => {
     const [loading, setLoading] = useState(false);
     const [phase, setPhase] = useState('questionnaire'); // 'questionnaire' | 'routine'
 
+    // Load saved answers from localStorage on mount (now namespaced per user)
+    React.useEffect(() => {
+        if (!user?.uid) return;
+        const saved = localStorage.getItem(`healthTwin_answers_${user.uid}`);
+        if (saved) {
+            try { setAnswers(JSON.parse(saved)); } catch (e) {}
+        }
+
+        const savedRoutine = localStorage.getItem(`healthTwin_routine_${user.uid}`);
+        if (savedRoutine) {
+            try { setRoutinePrefs(JSON.parse(savedRoutine)); } catch (e) {}
+        }
+    }, [user?.uid]);
+
     // Routine preferences state
     const [routinePrefs, setRoutinePrefs] = useState({
         phone: '',
@@ -184,10 +198,57 @@ const Questionnaire = () => {
         exercisePreference: '',
     });
 
-    const setRp = (key, val) => setRoutinePrefs(p => ({ ...p, [key]: val }));
+    const setRp = (key, val) => {
+        setRoutinePrefs(p => {
+            const up = { ...p, [key]: val };
+            if (user?.uid) {
+                localStorage.setItem(`healthTwin_routine_${user.uid}`, JSON.stringify(up));
+            }
+            return up;
+        });
+    };
+
+    const handleAutoFillRoutine = () => {
+        const up = {
+            phone: '+1234567890',
+            age: '30',
+            schedule: '9to5',
+            wakeTime: '07:00',
+            sleepTime: '23:00',
+            dietPreference: 'vegetarian',
+            exercisePreference: 'morning',
+        };
+        setRoutinePrefs(up);
+        if (user?.uid) {
+            localStorage.setItem(`healthTwin_routine_${user.uid}`, JSON.stringify(up));
+        }
+    };
 
     const handleSelect = (key, value) => {
-        setAnswers({ ...answers, [key]: value });
+        const newAnswers = { ...answers, [key]: value };
+        setAnswers(newAnswers);
+        if (user?.uid) {
+            localStorage.setItem(`healthTwin_answers_${user.uid}`, JSON.stringify(newAnswers));
+        }
+    };
+
+    const handleAutoFill = () => {
+        const demoAnswers = {
+            sleep_hours: 7.5,
+            sleep_quality: 7,
+            exercise_frequency: 4,
+            physical_activity: 6,
+            water_intake: 5,
+            diet_quality: 7,
+            fast_food: 1,
+            screen_time: 3.5,
+            stress_level: 5,
+            energy_level: 7
+        };
+        setAnswers(demoAnswers);
+        if (user?.uid) {
+            localStorage.setItem(`healthTwin_answers_${user.uid}`, JSON.stringify(demoAnswers));
+        }
     };
 
     const calculatePredictions = (d) => {
@@ -362,14 +423,23 @@ const Questionnaire = () => {
                         </div>
                     ))}
 
-                    <button
-                        className="btn btn-primary btn-lg w-full mt-4"
-                        onClick={handleNextPhase}
-                        disabled={!allAnswered}
-                        style={{ marginBottom: '2rem' }}
-                    >
-                        {`➡️ Next: Personalize Your Daily Routine (${progress}/${questions.length})`}
-                    </button>
+                    <div style={{ display: 'flex', gap: '1rem', flexDirection: 'column' }}>
+                        <button
+                            className="btn btn-outline w-full"
+                            onClick={handleAutoFill}
+                            style={{ padding: '0.75rem', borderColor: 'rgba(0, 240, 255, 0.3)' }}
+                        >
+                            ⚡ Auto-Fill Demo Data
+                        </button>
+                        <button
+                            className="btn btn-primary btn-lg w-full"
+                            onClick={handleNextPhase}
+                            disabled={!allAnswered}
+                            style={{ marginBottom: '2rem' }}
+                        >
+                            {`➡️ Next: Personalize Your Daily Routine (${progress}/${questions.length})`}
+                        </button>
+                    </div>
                 </>
             )}
 
@@ -511,10 +581,17 @@ const Questionnaire = () => {
                             ← Back
                         </button>
                         <button
+                            className="btn btn-outline"
+                            onClick={handleAutoFillRoutine}
+                            style={{ flex: 1, borderColor: 'rgba(0, 240, 255, 0.3)' }}
+                        >
+                            ⚡ Auto-Fill Demo Routine
+                        </button>
+                        <button
                             className="btn btn-primary btn-lg"
                             onClick={handleSubmit}
                             disabled={!routinePrefsComplete || loading}
-                            style={{ flex: 1, marginBottom: '2rem' }}
+                            style={{ flex: '1 0 100%', marginBottom: '2rem' }}
                         >
                             {loading ? '⏳ Generating Your AI Routine...' : '🧬 Generate Digital Twin & Daily Routine'}
                         </button>

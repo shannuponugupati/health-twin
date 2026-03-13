@@ -9,6 +9,7 @@ import {
 } from 'chart.js';
 import { Radar, Line } from 'react-chartjs-2';
 import { EMERGENCY_SYMPTOMS, detectEmergency, calculateEmergencyRisk } from '../utils/emergencyDetection';
+import { sendTelegramAlert } from '../utils/telegramApi';
 import axios from 'axios';
 
 ChartJS.register(
@@ -100,15 +101,44 @@ const ExpandableCard = ({ title, icon, children, expandedContent, className = ''
     );
 };
 
-const WhatIfSlider = ({ label, icon, value, onChange, min, max, step, unit }) => (
-    <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{icon} {label}</span>
-            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary-light)' }}>{value}{unit}</span>
+const WhatIfSlider = ({ label, icon, value, onChange, min, max, step, unit, showTicks }) => {
+    const ticks = [];
+    if (showTicks) {
+        for (let i = min; i <= max; i += step) {
+            ticks.push(i);
+        }
+    }
+
+    return (
+        <div style={{ marginBottom: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{icon} {label}</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary-light)' }}>{value}{unit}</span>
+            </div>
+            <div style={{ position: 'relative' }}>
+                <input 
+                    type="range" 
+                    min={min} 
+                    max={max} 
+                    step={step} 
+                    value={value} 
+                    onChange={(e) => onChange(parseFloat(e.target.value))} 
+                    style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer', margin: 0 }} 
+                />
+                {showTicks && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 2px', marginTop: '-2px' }}>
+                        {ticks.map(t => (
+                            <div key={t} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <div style={{ width: '1px', height: '4px', background: 'var(--surface-border)', marginBottom: '2px' }}></div>
+                                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600 }}>{t}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer' }} />
-    </div>
-);
+    );
+};
 
 // Habit Progress Bar
 const HabitBar = ({ label, icon, current, goal, unit }) => {
@@ -127,21 +157,22 @@ const HabitBar = ({ label, icon, current, goal, unit }) => {
 };
 
 // Risk Card
-const RiskCard = ({ title, icon, risk, color }) => {
+const RiskCard = ({ title, icon, risk, color, className }) => {
     const [animatedWidth, setAnimatedWidth] = useState(0);
+    
     useEffect(() => {
-        const t = setTimeout(() => setAnimatedWidth(risk), 300);
+        const t = setTimeout(() => setAnimatedWidth(risk), 300); // risk is already a percentage (0-100)
         return () => clearTimeout(t);
     }, [risk]);
 
     return (
-        <div className="glass-panel risk-card-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div className={`glass-panel risk-card-panel ${className}`} style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', animation: 'fade-in 0.5s ease-out' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>
-                    <span>{icon}</span> {title}
+                    <span style={{ fontSize: '1.2rem' }}>{icon}</span> {title}
                 </div>
                 <div style={{ fontWeight: 800, fontSize: '1.25rem', color: color }}>
-                    <AnimatedCounter value={risk} />%
+                    <AnimatedCounter value={Math.round(risk)} />%
                 </div>
             </div>
             <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -188,9 +219,12 @@ const Dashboard = () => {
                         predictions: predictionsDoc.data()
                     });
                     setWhatIf({
-                        exercise_frequency: ls.exercise_frequency || 3, sleep_hours: ls.sleep_hours || 7,
-                        screen_time: ls.screen_time || 4, diet_quality: ls.diet_quality || 5,
-                        stress_level: ls.stress_level || 5, water_intake: ls.water_intake || 5,
+                        exercise_frequency: ls.exercise_frequency || 3, 
+                        sleep_hours: Math.min(8, ls.sleep_hours || 7),
+                        screen_time: ls.screen_time || 4, 
+                        diet_quality: ls.diet_quality || 5,
+                        stress_level: ls.stress_level || 5, 
+                        water_intake: ls.water_intake || 5,
                     });
                 }
             } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -239,13 +273,15 @@ const Dashboard = () => {
                 Math.min(10, ls.sleep_hours || 7), Math.min(10, (ls.exercise_frequency || 0) * 1.4), ls.diet_quality || 5,
                 Math.max(0, 10 - (ls.stress_level || 5)), Math.max(0, 10 - (ls.screen_time || 3) * 0.8)
             ],
-            backgroundColor: 'rgba(0, 240, 255, 0.15)', 
+            backgroundColor: 'rgba(0, 240, 255, 0.1)', 
             borderColor: '#00F0FF', 
-            borderWidth: 2, 
-            pointBackgroundColor: '#00A3FF',
+            borderWidth: 3, 
+            pointBackgroundColor: '#00F0FF',
             pointBorderColor: '#00F0FF',
             pointHoverBackgroundColor: '#FFF',
-            pointHoverBorderColor: '#FF00E5'
+            pointHoverBorderColor: '#FF00E5',
+            pointRadius: 4,
+            pointHoverRadius: 6
         }]
     };
 
@@ -332,34 +368,43 @@ const Dashboard = () => {
             color: risk.color,
             symptom: symptoms.label,
             advice: symptoms.advice,
+            remedies: symptoms.remedies || [],
             timestamp: new Date().toLocaleTimeString()
         };
         
         setEmergencyStatus(newStatus);
         setShowSymptomModal(false);
 
-        // If High or Moderate Risk, send SMS
+        // If High or Moderate Risk, send SMS and Telegram Alert
         const userPhone = userData.phone || '';
         const contactPhone = userData.emergency_contact_phone || '';
-        if ((risk.level === 'HIGH' || risk.level === 'MODERATE') && contactPhone) {
+        if (risk.level === 'HIGH' || risk.level === 'MODERATE') {
             setAlertSending(true);
-            try {
-                await axios.post('http://localhost:3000/api/sms/emergency', {
-                    phone: userPhone,
-                    contactPhone: contactPhone,
-                    contactName: userData.emergency_contact_name,
-                    userName: userData.name || 'User',
-                    symptoms: symptoms.label
-                });
-                console.log('Emergency Alert SMS sent to', contactPhone);
-                if (!userPhone) console.warn('User own phone not set — please update Profile with phone number');
-            } catch (err) {
-                console.error('SMS Alert failed', err);
-            } finally {
-                setAlertSending(false);
+
+            // 1. Send Telegram Alert
+            const telegramMsg = `🚨 HEALTH EMERGENCY ALERT 🚨\nUser: ${userData.name || 'User'}\nSymptom: ${symptoms.label}\nSeverity: ${risk.level}\nAdvice: ${symptoms.advice}`;
+            sendTelegramAlert(telegramMsg);
+
+            // 2. Send SMS Alert
+            if (contactPhone) {
+                try {
+                    await axios.post('http://localhost:3000/api/sms/emergency', {
+                        phone: userPhone,
+                        contactPhone: contactPhone,
+                        contactName: userData.emergency_contact_name,
+                        userName: userData.name || 'User',
+                        symptoms: symptoms.label
+                    });
+                    console.log('Emergency Alert SMS sent to', contactPhone);
+                    if (!userPhone) console.warn('User own phone not set — please update Profile with phone number');
+                } catch (err) {
+                    console.error('SMS Alert failed', err);
+                }
+            } else {
+                console.warn('No emergency contact phone — please set one in Profile.');
             }
-        } else if (!contactPhone) {
-            console.warn('No emergency contact phone — please set one in Profile.');
+
+            setAlertSending(false);
         }
     };
 
@@ -369,30 +414,67 @@ const Dashboard = () => {
             <div className={`glass-panel ${emergencyStatus.level === 'HIGH' ? 'animate-pulse' : ''}`} style={{
                 background: `rgba(${emergencyStatus.level === 'HIGH' ? '239, 68, 68' : '245, 158, 11'}, 0.1)`,
                 border: `1px solid ${emergencyStatus.color}`,
-                padding: '1.25rem',
-                borderRadius: '16px',
-                marginBottom: '2rem',
+                padding: '1rem 1.5rem',
+                borderRadius: '20px',
+                marginBottom: '1rem',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '0.8rem',
-                boxShadow: `0 0 20px rgba(239, 68, 68, 0.2)`
+                boxShadow: `0 0 30px rgba(${emergencyStatus.level === 'HIGH' ? '239, 68, 68, 0.3' : '245, 158, 11, 0.2'})`,
+                position: 'relative',
+                overflow: 'hidden'
             }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 800, color: emergencyStatus.color, fontSize: '1.1rem' }}>
-                        <span>🚨</span> URGENT ALERT: {emergencyStatus.level} SEVERITY
+                {/* Decorative background element */}
+                <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '100px', height: '100px', background: emergencyStatus.color, opacity: 0.05, borderRadius: '50%' }}></div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 800, color: emergencyStatus.color, fontSize: '1.2rem', letterSpacing: '0.02em' }}>
+                        <span style={{ fontSize: '1.5rem' }}>🚨</span> SYSTEM ALERT: {emergencyStatus.level} SEVERITY
                     </div>
-                    <button onClick={() => setEmergencyStatus(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
+                    <button 
+                        onClick={() => setEmergencyStatus(null)} 
+                        style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                    >✕</button>
                 </div>
-                <div style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                    <strong>Detected Symptom:</strong> {emergencyStatus.symptom} <br/>
-                    <strong>Recommended Action:</strong> {emergencyStatus.advice}
-                </div>
-                {emergencyStatus.level === 'HIGH' && (
-                    <div style={{ fontSize: '0.8rem', color: '#EF4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span className="dot-red"></span> Emergency contacts have been notified.
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
+                    <div style={{ fontSize: '0.95rem', color: 'var(--text-main)', background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '0.5rem', color: emergencyStatus.color, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span>🩺</span> Condition Profile
+                        </div>
+                        <strong>Symptom:</strong> {emergencyStatus.symptom} <br/>
+                        <div style={{ marginTop: '0.5rem', lineHeight: '1.4' }}>
+                            <strong>Immediate Advice:</strong> {emergencyStatus.advice}
+                        </div>
                     </div>
-                )}
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Reported at {emergencyStatus.timestamp}</div>
+
+                    {emergencyStatus.remedies && emergencyStatus.remedies.length > 0 && (
+                        <div style={{ fontSize: '0.95rem', color: 'var(--text-main)', background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={{ fontWeight: 700, marginBottom: '0.5rem', color: '#00F0FF', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span>⚡</span> Remedies & Actions
+                            </div>
+                            <ul style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-secondary)' }}>
+                                {emergencyStatus.remedies.map((remedy, i) => (
+                                    <li key={i} style={{ marginBottom: '0.4rem' }}>{remedy}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        {emergencyStatus.level === 'HIGH' && (
+                            <div style={{ fontSize: '0.8rem', color: '#EF4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <span className="dot-red" style={{ width: '8px', height: '8px', background: '#EF4444', borderRadius: '50%', boxShadow: '0 0 10px #EF4444', display: 'inline-block' }}></span> 
+                                Emergency contacts notified
+                            </div>
+                        )}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Reported at {emergencyStatus.timestamp}</div>
+                    </div>
+                </div>
             </div>
         );
     };
@@ -412,16 +494,16 @@ const Dashboard = () => {
     if (coachTips.length === 0) coachTips.push({ cat: 'Maintenance', tip: 'Maintain your excellent habits!', details: 'Your routines are optimized! Consider tracking your habits continuously to prevent regression.', icon: '🌟', critical: false });
 
     return (
-        <div className="container animate-fade-in" style={{ paddingTop: '1.5rem', paddingBottom: '3rem' }}>
+        <div className="container animate-fade-in" style={{ paddingTop: '0', paddingBottom: '1rem' }}>
             <EmergencyBanner />
             {/* ── Top Header & Avatar ── */}
-            <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-                <div className={`avatar-container animate-fade-in-up ${avatarGlow}`} style={{ margin: '0 auto 1.5rem', width: '120px', height: '120px', borderRadius: '50%', background: 'rgba(10, 15, 30, 0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${scoreColor}`, position: 'relative', boxShadow: `0 0 30px ${scoreColor}66, inset 0 0 20px ${scoreColor}44` }}>
+            <div style={{ textAlign: 'center', marginBottom: '1rem', marginTop: '0' }}>
+                <div className={`avatar-container animate-fade-in-up ${avatarGlow}`} style={{ margin: '0 auto 1rem', width: '90px', height: '90px', borderRadius: '50%', background: 'rgba(10, 15, 30, 0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${scoreColor}`, position: 'relative', boxShadow: `0 0 25px ${scoreColor}55, inset 0 0 15px ${scoreColor}33` }}>
                     {/* Holographic Inner Ring */}
                     <div style={{ position: 'absolute', top: '-10px', left: '-10px', right: '-10px', bottom: '-10px', borderRadius: '50%', border: `1px dashed ${scoreColor}`, opacity: 0.5, animation: 'spin 10s linear infinite' }}></div>
                     
                     {userData.gender === 'female' ? (
-                        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#00F0FF', filter: 'drop-shadow(0 0 8px rgba(0, 240, 255, 0.8))' }}>
+                        <svg width="45" height="45" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#00F0FF', filter: 'drop-shadow(0 0 8px rgba(0, 240, 255, 0.8))' }}>
                             <path d="M12 2a4 4 0 0 1 4 4v1c0 2-2 3-4 3s-4-1-4-3V6a4 4 0 0 1 4-4z" />
                             <path d="M12 10c-3.3 0-6 2.7-6 6v5h12v-5c0-3.3-2.7-6-6-6z" />
                             <path d="M7.5 16s2 2 4.5 2 4.5-2 4.5-2" />
@@ -429,7 +511,7 @@ const Dashboard = () => {
                             <path d="M7.5 10c-1 0-2.5.5-3.5 2" />
                         </svg>
                     ) : (
-                        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#00F0FF', filter: 'drop-shadow(0 0 8px rgba(0, 240, 255, 0.8))' }}>
+                        <svg width="45" height="45" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#00F0FF', filter: 'drop-shadow(0 0 8px rgba(0, 240, 255, 0.8))' }}>
                             <path d="M12 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
                             <path d="M3 21v-2a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v2" />
                         </svg>
@@ -438,10 +520,10 @@ const Dashboard = () => {
                         <span style={{color: '#030712', fontSize: '14px', fontWeight: 900}}>✓</span>
                     </div>
                 </div>
-                <h1 className="text-gradient" style={{ fontSize: 'clamp(2.5rem, 5vw, 4rem)', margin: '0 0 0.5rem 0', letterSpacing: '-0.02em', textShadow: '0 0 30px rgba(0, 240, 255, 0.3)' }}>
+                <h1 className="text-gradient" style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', margin: '0 0 0.25rem 0', letterSpacing: '-0.02em', textShadow: '0 0 30px rgba(0, 240, 255, 0.3)' }}>
                     {userData.name || 'Your'}'s Digital Twin
                 </h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', margin: '0 auto 1.5rem', maxWidth: '600px' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', margin: '0 auto 1rem', maxWidth: '600px' }}>
                     A real-time AI-powered assessment of your biological health vectors.
                 </p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
@@ -468,34 +550,35 @@ const Dashboard = () => {
             {showSymptomModal && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    background: 'rgba(2, 6, 23, 0.95)', zIndex: 1000,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+                    background: 'rgba(2, 6, 23, 0.9)', zIndex: 1000,
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '1rem',
+                    overflowY: 'auto'
                 }}>
-                    <div className="glass-panel animate-scale-in" style={{ maxWidth: '500px', width: '100%', padding: '2rem' }}>
-                        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-                            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🚨</div>
+                    <div className="glass-panel animate-scale-in" style={{ maxWidth: '500px', width: '100%', padding: '0.75rem 1.5rem 1.5rem', marginTop: '2rem' }}>
+                        <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
+                            <div style={{ fontSize: '2.2rem', marginBottom: '0.25rem' }}>🚨</div>
                             <h2 style={{ margin: 0 }}>Emergency Report</h2>
                             <p style={{ color: 'var(--text-secondary)' }}>Select any severe symptoms you are currently experiencing.</p>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.75rem', marginBottom: '2rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.5rem', marginBottom: '1.5rem' }}>
                             {Object.entries(EMERGENCY_SYMPTOMS).map(([key, s]) => (
                                 <button
                                     key={key}
                                     onClick={() => handleReportEmergency(key)}
                                     className="glass-panel"
                                     style={{
-                                        padding: '1rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '1rem',
+                                        padding: '0.75rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.8rem',
                                         border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', transition: 'all 0.2s',
                                         background: 'rgba(255,255,255,0.02)'
                                     }}
                                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
                                     onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
                                 >
-                                    <span style={{ fontSize: '1.5rem' }}>{s.icon || '⚠️'}</span>
+                                    <span style={{ fontSize: '1.2rem' }}>{s.icon || '⚠️'}</span>
                                     <div>
-                                        <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>{s.label}</div>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Urgency: {s.severity}</div>
+                                        <div style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '0.9rem' }}>{s.label}</div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Urgency: {s.severity}</div>
                                     </div>
                                 </button>
                             ))}
@@ -513,12 +596,12 @@ const Dashboard = () => {
             )}
 
             <p style={{ 
-                fontSize: '0.75rem', 
+                fontSize: '0.7rem', 
                 color: 'var(--text-muted)', 
                 textAlign: 'center', 
-                marginTop: '3rem',
-                lineHeight: 1.5,
-                opacity: 0.6
+                marginTop: '1.5rem',
+                lineHeight: 1.4,
+                opacity: 0.5
             }}>
                 🛡️ <strong>Health Twin Safety Note:</strong> This system provides general health guidance and should not replace professional medical advice. <br/>
                 In case of severe symptoms, please contact a healthcare professional or emergency services immediately.
@@ -526,15 +609,15 @@ const Dashboard = () => {
 
             {/* ═══ HEALTH RISKS CARDS ═══ */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }} className="animate-fade-in-up delay-1">
-                <RiskCard title="Stress Burden Index" icon="🧠" risk={p.stress_risk} color="#FFE600" />
-                <RiskCard title="Metabolic Health Risk" icon="⚖️" risk={p.obesity_risk} color="#FF003C" />
-                <RiskCard title="Sleep Efficiency Index" icon="💤" risk={p.sleep_disorder_risk} color="#FF00E5" />
+                <RiskCard title="Stress Burden Index" icon="🧠" risk={p.stress_risk} color="#FFE600" className="glass-panel" />
+                <RiskCard title="Metabolic Health Risk" icon="⚖️" risk={p.obesity_risk} color="#FF003C" className="glass-panel" />
+                <RiskCard title="Sleep Efficiency Index" icon="💤" risk={p.sleep_disorder_risk} color="#FF00E5" className="glass-panel" />
             </div>
 
             <div className="dashboard-grid">
 
                 {/* ═══ GAUGE: BIOLOGICAL HEALTH SCORE ═══ */}
-                <ExpandableCard title="VITALS & HEALTH METRICS" icon="🧬" className="animate-fade-in-up delay-2" expandedContent={
+                <ExpandableCard title="VITALS & HEALTH METRICS" icon="🧬" className="glass-panel animate-fade-in-up delay-1" expandedContent={
                     <div>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Based on your lifestyle inputs, we simulate your biological age vector compared to chronological age.</p>
                         <div style={{ display: 'flex', justifyContent: 'space-around', margin: '1.5rem 0', padding: '1.5rem', background: 'rgba(0, 240, 255, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(0, 240, 255, 0.1)' }}>
@@ -571,28 +654,60 @@ const Dashboard = () => {
                 </ExpandableCard>
 
                 {/* ═══ RADAR: LIFESTYLE BALANCE ═══ */}
-                <ExpandableCard title="ACTIVITY BALANCE PROFILE" icon="🎯" className="animate-fade-in-up delay-2" expandedContent={
+                <ExpandableCard title="ACTIVITY BALANCE PROFILE" icon="🎯" className="glass-panel animate-fade-in-up delay-2" expandedContent={
                     <div>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Comparison of your daily habits against optimal health-tech benchmarks.</p>
-                        <table className="comparison-table">
-                            <thead><tr><th>Habit Metric</th><th>Your Vector</th><th>Optimum Baseline</th></tr></thead>
+                        <table className="cockpit-table">
+                            <thead>
+                                <tr>
+                                    <th>Habit Metric</th>
+                                    <th>Your Vector</th>
+                                    <th>Baseline</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
                             <tbody>
-                                <tr><td>Sleep Quality</td><td className={ls.sleep_hours < 7 ? 'text-warn' : 'text-good'}>{ls.sleep_hours || 7} hrs</td><td>7–8 hrs</td></tr>
-                                <tr><td>Physical Activity</td><td className={ls.exercise_frequency < 3 ? 'text-warn' : 'text-good'}>{ls.exercise_frequency || 0} sessions/wk</td><td>3–5 sessions/wk</td></tr>
-                                <tr><td>Screen Exposure</td><td className={ls.screen_time > 4 ? 'text-warn' : 'text-good'}>{ls.screen_time || 4} hrs</td><td>&lt; 3 hrs</td></tr>
-                                <tr><td>Hydration</td><td className={ls.water_intake < 7 ? 'text-warn' : 'text-good'}>{getWaterLiters(ls.water_intake)}</td><td>3–5 Litres</td></tr>
-                                <tr><td>Nutritional Quality</td><td className={ls.diet_quality < 7 ? 'text-warn' : 'text-good'}>{ls.diet_quality || 5} / 10</td><td>7+ / 10</td></tr>
+                                <tr>
+                                    <td><span style={{marginRight: '8px'}}>💤</span> Sleep Quality</td>
+                                    <td style={{ fontWeight: 700, color: ls.sleep_hours < 7 ? 'var(--error)' : 'var(--success)' }}>{ls.sleep_hours || 7} hrs</td>
+                                    <td>7–8 hrs</td>
+                                    <td><span className="vector-status" style={{ background: ls.sleep_hours < 7 ? 'var(--error-bg)' : 'var(--success-bg)', color: ls.sleep_hours < 7 ? 'var(--error)' : 'var(--success)' }}>{ls.sleep_hours < 7 ? 'DEGRADED' : 'OPTIMAL'}</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span style={{marginRight: '8px'}}>🏋️</span> Physical Activity</td>
+                                    <td style={{ fontWeight: 700, color: ls.exercise_frequency < 3 ? 'var(--error)' : 'var(--success)' }}>{ls.exercise_frequency || 0} sg/wk</td>
+                                    <td>3–5 sg/wk</td>
+                                    <td><span className="vector-status" style={{ background: ls.exercise_frequency < 3 ? 'var(--error-bg)' : 'var(--success-bg)', color: ls.exercise_frequency < 3 ? 'var(--error)' : 'var(--success)' }}>{ls.exercise_frequency < 3 ? 'LOW' : 'STABLE'}</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span style={{marginRight: '8px'}}>💻</span> Screen Exposure</td>
+                                    <td style={{ fontWeight: 700, color: ls.screen_time > 4 ? 'var(--error)' : 'var(--success)' }}>{ls.screen_time || 4} hrs</td>
+                                    <td>&lt; 3 hrs</td>
+                                    <td><span className="vector-status" style={{ background: ls.screen_time > 4 ? 'var(--error-bg)' : 'var(--success-bg)', color: ls.screen_time > 4 ? 'var(--error)' : 'var(--success)' }}>{ls.screen_time > 4 ? 'SYSTEM LOAD' : 'SAFE'}</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span style={{marginRight: '8px'}}>💧</span> Hydration</td>
+                                    <td style={{ fontWeight: 700, color: ls.water_intake < 7 ? 'var(--error)' : 'var(--success)' }}>{getWaterLiters(ls.water_intake)}</td>
+                                    <td>3–5 L</td>
+                                    <td><span className="vector-status" style={{ background: ls.water_intake < 7 ? 'var(--error-bg)' : 'var(--success-bg)', color: ls.water_intake < 7 ? 'var(--error)' : 'var(--success)' }}>{ls.water_intake < 7 ? 'DEPLETED' : 'FUELED'}</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span style={{marginRight: '8px'}}>🥗</span> Nutrition</td>
+                                    <td style={{ fontWeight: 700, color: ls.diet_quality < 7 ? 'var(--error)' : 'var(--success)' }}>{ls.diet_quality || 5} / 10</td>
+                                    <td>7+ / 10</td>
+                                    <td><span className="vector-status" style={{ background: ls.diet_quality < 7 ? 'var(--error-bg)' : 'var(--success-bg)', color: ls.diet_quality < 7 ? 'var(--error)' : 'var(--success)' }}>{ls.diet_quality < 7 ? 'DIRTY' : 'CLEAN'}</span></td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
                 }>
-                    <div style={{ height: '220px', margin: '0 auto', maxWidth: '280px' }}>
+                    <div className="radar-glow" style={{ height: '240px', margin: '0 auto', maxWidth: '300px', padding: '10px' }}>
                         <Radar data={radarData} options={radarOptions} />
                     </div>
                 </ExpandableCard>
 
                 {/* ═══ FUTURE HEALTH PROJECTION ═══ */}
-                <ExpandableCard title="LONG-TERM HEALTH OUTLOOK" icon="📉" className="dashboard-card-full animate-fade-in-up delay-3" expandedContent={
+                <ExpandableCard title="LONG-TERM HEALTH OUTLOOK" icon="📉" className="dashboard-card-full glass-panel animate-fade-in-up delay-3" expandedContent={
                     <div>
                         <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
                             Your Digital Twin allows us to forward-simulate your health outcome over the next 3 years. The <strong>Orange Trajectory</strong> maps your current lifestyle score decay, while the <strong>Green Trajectory</strong> projects health gains if you adopt the AI Coach's recommendations.
@@ -636,7 +751,7 @@ const Dashboard = () => {
 
                 {/* ═══ WHAT-IF SIMULATION ═══ */}
                 {whatIf && whatIfPredictions && (
-                    <div className="dashboard-card dashboard-card-full animate-fade-in-up delay-5 hover-glow">
+                    <div className="dashboard-card dashboard-card-full glass-panel animate-fade-in-up delay-5 hover-glow">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                             <h3 style={{ margin: 0 }}>🔬 LIFESTYLE IMPACT SIMULATOR</h3>
                             <span style={{ fontSize: '0.75rem', background: 'rgba(14, 165, 233, 0.15)', color: 'var(--primary-light)', padding: '0.3rem 0.8rem', borderRadius: '12px', fontWeight: 600 }}>REAL-TIME ENGINE</span>
@@ -645,10 +760,10 @@ const Dashboard = () => {
                         
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '3rem' }}>
                             <div>
-                                <WhatIfSlider label="Exercise Frequency" icon="🏃" value={whatIf.exercise_frequency} unit=" days/wk" min={0} max={7} step={1} onChange={(v) => setWhatIf({ ...whatIf, exercise_frequency: v })} />
-                                <WhatIfSlider label="Sleep Duration" icon="🌙" value={whatIf.sleep_hours} unit=" hrs/night" min={3} max={12} step={0.5} onChange={(v) => setWhatIf({ ...whatIf, sleep_hours: v })} />
-                                <WhatIfSlider label="Screen Time" icon="💻" value={whatIf.screen_time} unit=" hrs/day" min={0} max={14} step={1} onChange={(v) => setWhatIf({ ...whatIf, screen_time: v })} />
-                                <WhatIfSlider label="Water Intake" icon="💧" value={whatIf.water_intake} unit=" / 10" min={1} max={10} step={1} onChange={(v) => setWhatIf({ ...whatIf, water_intake: v })} />
+                                <WhatIfSlider label="Exercise Frequency" icon="🏃" value={whatIf.exercise_frequency} unit=" days/wk" min={0} max={7} step={1} showTicks={true} onChange={(v) => setWhatIf({ ...whatIf, exercise_frequency: v })} />
+                                <WhatIfSlider label="Sleep Duration" icon="🌙" value={whatIf.sleep_hours} unit=" hrs/night" min={0} max={8} step={1} showTicks={true} onChange={(v) => setWhatIf({ ...whatIf, sleep_hours: v })} />
+                                <WhatIfSlider label="Screen Time" icon="💻" value={whatIf.screen_time} unit=" hrs/day" min={0} max={14} step={1} showTicks={true} onChange={(v) => setWhatIf({ ...whatIf, screen_time: v })} />
+                                <WhatIfSlider label="Water Intake" icon="💧" value={whatIf.water_intake} unit=" / 10" min={1} max={10} step={1} showTicks={true} onChange={(v) => setWhatIf({ ...whatIf, water_intake: v })} />
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                 <div style={{ 
