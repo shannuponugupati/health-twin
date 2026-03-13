@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../App';
 import { generateRoutine, generateDietPlan, formatTime12 } from '../utils/routineGenerator';
+import { sendTelegramAlert } from '../utils/telegramApi';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
@@ -286,6 +287,7 @@ const RoutinePlanner = () => {
     const [smsStatus, setSmsStatus] = useState('idle'); // 'idle' | 'scheduling' | 'scheduled' | 'error'
     const [globalSmsEnabled, setGlobalSmsEnabled] = useState(true);
     const [smsMode, setSmsMode] = useState('mock');
+    const telegramTimersRef = useRef([]); // holds setTimeout IDs for Telegram alerts
 
     useEffect(() => {
         const load = async () => {
@@ -386,6 +388,35 @@ const RoutinePlanner = () => {
             setSmsStatus('scheduled');
             setSmsMode(data.mode || 'mock');
             setGlobalSmsEnabled(true);
+
+            // ── Telegram Alerts ─────────────────────────────────────────────
+            // Clear any existing Telegram timers before scheduling new ones
+            telegramTimersRef.current.forEach(id => clearTimeout(id));
+            telegramTimersRef.current = [];
+
+            // Send an immediate Telegram confirmation
+            const enabledNames = enabledRoutine.filter(r => r.enabled).map(r => `${r.icon || ''} ${r.label} @ ${formatTime12(r.time)}`).join('\n');
+            await sendTelegramAlert(`✅ Health Reminders Activated!\n\n${enabledNames}\n\n⏰ You will receive a Telegram alert for each scheduled reminder.`);
+
+            // Schedule individual Telegram alerts at each reminder's time
+            const now = new Date();
+            enabledRoutine
+                .filter(r => r.enabled)
+                .forEach(r => {
+                    const [hours, minutes] = r.time.split(':').map(Number);
+                    const reminderTime = new Date();
+                    reminderTime.setHours(hours, minutes, 0, 0);
+
+                    // If the reminder time has already passed today, skip it
+                    const msUntil = reminderTime.getTime() - now.getTime();
+                    if (msUntil > 0) {
+                        const timerId = setTimeout(() => {
+                            sendTelegramAlert(`🔔 Health Reminder: ${r.icon || ''} ${r.label}\n\n${r.description || r.smsMessage || ''}\n\n⏰ ${formatTime12(r.time)} — Stay on track with your health goals!`);
+                        }, msUntil);
+                        telegramTimersRef.current.push(timerId);
+                    }
+                });
+            // ────────────────────────────────────────────────────────────────
         } catch (err) {
             console.error('SMS schedule error:', err);
             setSmsStatus('error');
@@ -395,6 +426,10 @@ const RoutinePlanner = () => {
     const handleCancelSms = async () => {
         try {
             await fetch(`${BACKEND_URL}/api/sms/cancel/${user.uid}`, { method: 'DELETE' });
+            // Clear all pending Telegram timers
+            telegramTimersRef.current.forEach(id => clearTimeout(id));
+            telegramTimersRef.current = [];
+            await sendTelegramAlert('🔕 Health Reminders Cancelled. Your Telegram alerts have been stopped.');
             setGlobalSmsEnabled(false);
             setSmsStatus('idle');
         } catch (err) {
